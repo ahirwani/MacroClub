@@ -1,7 +1,8 @@
 rm(list = ls())
 
-#setwd("/Users//adhya/Documents/R_Macro/")
+#setwd("/Users//adhya/Documents/R_Macro/MacroClub/")
 #setwd("C://R//MAXIM//MacroClub")
+
 library(openxlsx)
 library(lubridate)
 library(zoo)
