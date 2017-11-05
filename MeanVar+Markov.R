@@ -59,7 +59,7 @@ mean_var_optimizer_unconstrained <- function (mean_returns, cov_matrix, rf)
     p_weight <- lambda*min_var_weights + (1-lambda) * w2_weights
     p_variance <- t(p_weight) %*% cov_matrix %*% p_weight
     sharpe <- (return_seq[i] -rf )/ sqrt(p_variance)
-    if(max(p_weight)>1) {break}
+    if(max(p_weight)>1) {break}                         #constraint on leverage is 1
     if(sharpe>max_sharpe)
     {
       max_sharpe <- sharpe[1,1]
