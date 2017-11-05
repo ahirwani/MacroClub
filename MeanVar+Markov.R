@@ -4,6 +4,7 @@ rm(list = ls())
 #setwd("C://R//MAXIM//MacroClub")
 
 library(openxlsx)
+library(xlsx)
 library(lubridate)
 library(zoo)
 library(xts)
@@ -20,9 +21,10 @@ monthly_returns <-cum_return_21day[monthly_day][-1,1:9]            #Dont use t b
 data_month <-data.frame(coredata(monthly_returns))                 #convert to data frame
 data_month_all <- data.frame(coredata(cum_return_21day[monthly_day][-1,]))           #in case you need all
 
-rf <- 0.003              #Monthly risk free
-mean_returns <- colMeans(data_month)
-cov_returns <- cov(data_month)
+rf <- 0.001              #Monthly risk free from T-Bills 
+
+#mean_returns <- mean_ret
+#cov_matrix <- cov_mat
 
 mean_var_optimizer_unconstrained(mean_returns, cov_returns, rf)
 
@@ -32,40 +34,43 @@ mean_var_optimizer_unconstrained <- function (mean_returns, cov_matrix, rf)
   
   #frontier portfolios
   min_var_weights <- ( solve(cov_matrix) %*% iota ) / (t(iota) %*% solve(cov_matrix) %*% iota)[1]
-  max_ret_weights <- ( solve(cov_matrix) %*% mean_returns ) / (t(iota) %*% solve(cov_matrix) %*% mean_returns)[1]
+  w2_weights <- ( solve(cov_matrix) %*% mean_returns ) / (t(iota) %*% solve(cov_matrix) %*% mean_returns)[1]
   
-  #The second frontier is NOT a max return portfolio actually, but I keep names same to avoid changes
+  #The second frontier is NOT a max return portfolio
   
   min_var_return <- t(min_var_weights) %*% mean_returns
-  max_ret_return <- t(max_ret_weights) %*% mean_returns
+  w2_return <- t(w2_weights) %*% mean_returns
   min_var_var <- (t(min_var_weights) %*% cov_matrix %*% min_var_weights)
-  max_ret_var <- (t(max_ret_weights) %*% cov_matrix %*% max_ret_weights)
+  w2_var <- (t(w2_weights) %*% cov_matrix %*% w2_weights)
   sharpe_min_var <- (min_var_return[1] -rf) / sqrt(min_var_var[1])
-  sharpe_max_ret <- (max_ret_return[1] -rf) / sqrt(max_ret_var[1])
+  sharpe_w2 <- (w2_return[1] -rf) / sqrt(w2_var[1])
   
   #full frontier is linear combination of the above, find maximum sharpe
-  return_seq <- min_var_return[1] + seq(1,250,1) * (max_ret_return[1]-min_var_return[1]) /50
-  max_sharpe <- 0
+  #create sequence of 250 with interval as 1/25th of diff b/w returns
+  
+  return_seq <- min_var_return[1] + seq(1,250,1) * (w2_return[1]-min_var_return[1]) /25
+  max_sharpe <- sharpe_min_var
   max_sharpe_weights <- min_var_weights
   
-  #Need to run till sharpe decreases from before, currently fixed number
-  
+  #Need to run till sharpe decreases from before to get tangent portfolio
   for(i in 1:250)
   {
-    return_seq[i] 
-    lambda <- (return_seq[i] - max_ret_return[1]) / (min_var_return[1] - max_ret_return[1])
-    p_weight <- lambda*min_var_weights + (1-lambda) * max_ret_weights
+    lambda <- (return_seq[i] - w2_return[1]) / (min_var_return[1] - w2_return[1])
+    p_weight <- lambda*min_var_weights + (1-lambda) * w2_weights
     p_variance <- t(p_weight) %*% cov_matrix %*% p_weight
     sharpe <- (return_seq[i] -rf )/ sqrt(p_variance)
+    if(max(p_weight)>1) {break}
     if(sharpe>max_sharpe)
     {
-      max_sharpe <- sharpe
+      max_sharpe <- sharpe[1,1]
       max_sharpe_weights <- p_weight
     }
+    else
+      {break}                               #if sharpe is lower than max sharpe, we have reached tangency
   }
   
   max_sharpe_return <- t(max_sharpe_weights) %*% mean_returns
-  return(list(min_var_weights, max_ret_weights, max_sharpe_weights))
+  return(list(min_var_weights, w2_weights, max_sharpe_weights))
 }
 
 strategy_meanvar <- function(data_assets_ret, lookback, rebal, policy_weight, rf)             #Lookback is no of periods (months for monthly data)
@@ -76,13 +81,14 @@ strategy_meanvar <- function(data_assets_ret, lookback, rebal, policy_weight, rf
   wealth_minvar <- data_assets_ret[lookback:no_rows,1]
   colnames(wealth_minvar) <- c("Wealth")
   wealth_minvar[,1] <- 1
-  wealth_maxret <- wealth_minvar
+  wealth_w2 <- wealth_minvar
   wealth_maxsharpe <- wealth_minvar
   wealth_policy <- wealth_minvar
   
   weight_minvar <- data_assets_ret[(lookback-1):no_rows,]
-  weight_maxret <- data_assets_ret[(lookback-1):no_rows,]
   weight_maxsharpe <- data_assets_ret[(lookback-1):no_rows,]
+  
+  #i<-12                       #One of the cases where the results are weird, but look right...
   
   for(i in 1:(no_rows-lookback))
   {
@@ -94,24 +100,22 @@ strategy_meanvar <- function(data_assets_ret, lookback, rebal, policy_weight, rf
     #mean_returns <- mean_ret
     #cov_matrix <- cov_mat
     #rf <- mean_rf
-    weights[[1]]
     weight_minvar[i,] <- weights[[1]]
-    weight_maxret[i,] <- weights[[2]]
+    weight_w2[i,] <- weights[[2]]
     weight_maxsharpe[i,] <- weights[[3]]
     
     wealth_minvar[i+1,1] <- wealth_minvar[i,1]*(1+sum(coredata(weight_minvar[i,])*coredata(data_assets_ret[i+lookback-1,])))
-    wealth_maxret[i+1,1] <- wealth_maxret[i,1]*(1+sum(coredata(weight_maxret[i,])*coredata(data_assets_ret[i+lookback-1,])))
     wealth_maxsharpe[i+1,1] <- wealth_maxsharpe[i,1]*(1+sum(coredata(weight_maxsharpe[i,])*coredata(data_assets_ret[i+lookback-1,])))
     wealth_policy[i+1,1] <- wealth_policy[i,1]*(1+sum(policy_weight*coredata(data_assets_ret[i+lookback-1,])))
   }
   
   plot(index(wealth_minvar),wealth_minvar[,1], xlab="Date", ylab = "Wealth", main = "Comparison of Strategies", 
-       col="black", type ='l')
-  #lines(wealth_maxret$Date, wealth_maxret$Wealth,  col="Blue")
-  plot(index(wealth_maxsharpe), wealth_maxsharpe[,1], col="Red",type ='l')
-  plot(index(wealth_policy), wealth_policy[,1], col="Green", type='l')
-  #legend("topright", legend=c("Min Variance", "Max Return","Max Sharpe", "Policy"),col=c("black","blue","red","green"),lty=1)
-  #return(list(wealth_minvar,wealth_maxret,wealth_maxsharpe,wealth_policy))
+       col="black", cex.main=0.8, ylim=c(0.6,1.5), type ='l')
+  lines(index(wealth_policy), wealth_policy[,1], col="Blue", type='l')
+  lines(index(wealth_maxsharpe), wealth_maxsharpe[,1], col="Red",type ='l')
+  legend("topleft", legend=c("Min Variance", "Max Sharpe", "Policy"),col=c("black","red", "blue"),lty=1)
+  #plot(index(wealth_maxsharpe), wealth_maxsharpe[,1], col="Red",type ='l')
+  #return(list(wealth_minvar,wealth_w2,wealth_maxsharpe,wealth_policy))
 }
 
 statistics <- function(X)                 #function to compute statistics for any given array
