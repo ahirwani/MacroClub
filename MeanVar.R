@@ -1,6 +1,7 @@
 rm(list = ls())
 
 setwd("/Users//adhya/Documents/R_Macro/")
+library(lpSolve)
 library(openxlsx)
 library(lubridate)
 library(zoo)
