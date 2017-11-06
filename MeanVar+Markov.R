@@ -3,11 +3,16 @@ rm(list = ls())
 #setwd("/Users//adhya/Documents/R_Macro/MacroClub/")
 #setwd("C://R//MAXIM//MacroClub")
 
+##########################################################################
+#Setup
+
 library(openxlsx)
 library(xlsx)
 library(lubridate)
 library(zoo)
 library(xts)
+library(moments)
+library(PerformanceAnalytics)
 
 data.macro <- read.xlsx("MacroIndices.xlsx")
 data.macro[,1] <- convertToDate(data.macro[,1],origin="1899-12-30")
@@ -22,11 +27,46 @@ data_month <-data.frame(coredata(monthly_returns))                 #convert to d
 data_month_all <- data.frame(coredata(cum_return_21day[monthly_day][-1,]))           #in case you need all
 
 rf <- 0.001              #Monthly risk free from T-Bills 
+policy_weight <- c(0.05,0.3,0.05,0.15,0.10,0.05,0.05,0.05,0.20)
 
-#mean_returns <- mean_ret
-#cov_matrix <- cov_mat
+#########################################################################
+#Static In Sample
 
-mean_var_optimizer_unconstrained(mean_returns, cov_returns, rf)
+mean_returns <- colMeans(monthly_returns)
+cov_matrix <- cov(monthly_returns)
+
+w <- mean_var_optimizer_unconstrained(mean_returns, cov_matrix, rf)
+static_portfolios(w[[1]][,1],w[[3]][,1],policy_weight)
+w_minvar <- w[[1]][,1]
+w_sharpe <- w[[3]][,1]
+
+static_portfolios <- function(w_minvar,w_sharpe,policy)
+{
+  wealth_minvar <- rbind(data_assets_ret[1,1],data_assets_ret[,1])
+  colnames(wealth_minvar) <- c("Wealth")
+  wealth_minvar[,1] <- 1
+  wealth_w2 <- wealth_minvar
+  wealth_maxsharpe <- wealth_minvar
+  wealth_policy <- wealth_minvar 
+  
+  for(i in 1:(nrow(wealth_minvar)-1))
+  {
+    wealth_policy[i+1,1] <- wealth_policy[i,1]*(1+sum(policy_weight*coredata(data_assets_ret[i,])))
+    wealth_minvar[i+1,1] <- wealth_minvar[i,1]*(1+sum(w_minvar*coredata(data_assets_ret[i,])))
+    wealth_maxsharpe[i+1,1] <- wealth_maxsharpe[i,1]*(1+sum(w_sharpe*coredata(data_assets_ret[i,])))
+  }
+  
+  plot(index(wealth_minvar),wealth_minvar[,1], xlab="Date", ylab = "Wealth", main = "Comparison of Strategies", 
+       col="black", cex.main=0.8, ylim=c(0.6,2), type ='l')
+  lines(index(wealth_policy), wealth_policy[,1], col="Blue", type='l')
+  lines(index(wealth_maxsharpe), wealth_maxsharpe[,1], col="Red",type ='l')
+  legend("topleft", legend=c("Min Variance", "Max Sharpe", "Policy"),col=c("black","red", "blue"),lty=1)
+  statistics(wealth_minvar)
+  statistics(wealth_policy)
+  statistics(wealth_maxsharpe)
+}
+
+#####################################################################################
 
 mean_var_optimizer_unconstrained <- function (mean_returns, cov_matrix, rf)
 {
@@ -73,6 +113,9 @@ mean_var_optimizer_unconstrained <- function (mean_returns, cov_matrix, rf)
   return(list(min_var_weights, w2_weights, max_sharpe_weights))
 }
 
+#####################################################################################
+#Dynamic Strategy
+
 strategy_meanvar <- function(data_assets_ret, lookback, rebal, policy_weight, rf)             #Lookback is no of periods (months for monthly data)
 {
   no_cols <- ncol(data_assets_ret)
@@ -81,7 +124,6 @@ strategy_meanvar <- function(data_assets_ret, lookback, rebal, policy_weight, rf
   wealth_minvar <- data_assets_ret[lookback:no_rows,1]
   colnames(wealth_minvar) <- c("Wealth")
   wealth_minvar[,1] <- 1
-  wealth_w2 <- wealth_minvar
   wealth_maxsharpe <- wealth_minvar
   wealth_policy <- wealth_minvar
   
@@ -101,7 +143,6 @@ strategy_meanvar <- function(data_assets_ret, lookback, rebal, policy_weight, rf
     #cov_matrix <- cov_mat
     #rf <- mean_rf
     weight_minvar[i,] <- weights[[1]]
-    weight_w2[i,] <- weights[[2]]
     weight_maxsharpe[i,] <- weights[[3]]
     
     wealth_minvar[i+1,1] <- wealth_minvar[i,1]*(1+sum(coredata(weight_minvar[i,])*coredata(data_assets_ret[i+lookback-1,])))
@@ -116,24 +157,73 @@ strategy_meanvar <- function(data_assets_ret, lookback, rebal, policy_weight, rf
   legend("topleft", legend=c("Min Variance", "Max Sharpe", "Policy"),col=c("black","red", "blue"),lty=1)
   #plot(index(wealth_maxsharpe), wealth_maxsharpe[,1], col="Red",type ='l')
   #return(list(wealth_minvar,wealth_w2,wealth_maxsharpe,wealth_policy))
+  statistics(wealth_minvar)
+  statistics(wealth_policy)
+  statistics(wealth_maxsharpe)
 }
 
-statistics <- function(X)                 #function to compute statistics for any given array
-{
-  sample_mean=mean(X)
-  sample_sd=sd(X)
-  sample_skew=skewness(X)
-  sample_kurtosis=kurtosis(X)
-  sample_sharpe= (sample_mean - rf)/sample_sd
-  return(round(c(sample_mean,sample_sd,sample_skew,sample_kurtosis,sample_sharpe),3))
-}
-
-i<-1
-policy_weight <- c(0.05,0.3,0.05,0.15,0.10,0.05,0.05,0.05,0.20)
 strategy_meanvar(data_month,36,1,policy_weight,rf)
 lookback <- 36
 rebal <- 1
 data_assets_ret <- monthly_returns
+
+###################################################################
+#Results
+
+maxdrawdown<-function(returns){
+  minSum <-9999
+  thisSum <- 0
+  end_index<-1
+  for( j in 1:nrow(returns)) {
+    thisSum= thisSum+returns[[j,1]]
+    if (thisSum > 0) {
+      thisSum = 0
+    } else if(thisSum < minSum) {
+      minSum = thisSum
+      end_index=j
+    }
+  }
+  return(c(exp(minSum)-1,end_index))
+}
+
+statistics<-function(port)
+{
+  
+  returns <- port[-nrow(port),]
+  for(i in 1:(nrow(port)-1))
+  {
+    returns[i,1] <- log(port[[i+1,1]]/port[[i,1]])
+  }
+  colnames(returns) <- c("Returns")
+  
+  ##First measures
+  m<-mean(returns)
+  cumul_ret<-port[[nrow(port),1]]/port[[1,1]] -1
+  sigma<-sd(returns)
+  sharpe<-(m-rf)/sigma
+  skew<-unname(skewness(returns))
+  kurt<-unname(kurtosis(returns))
+  worstday<-returns[order(returns)[1:10]] ##10 worst days
+  quantiles<-quantile(returns,seq(0.01,0.05,length=6))
+  cvar<-ES(returns,p=0.95,method="gaussian") ##cvar
+  
+  #Drawdown
+  a<-maxdrawdown(returns[,1])
+  maxDrawdow<-a[1] ##max drawdown in simple returns
+  Data<-data.frame(date = index(returns), returns, row.names=NULL)
+  end_index<-a[2] ##index for the end date of the max drawdown
+  end_date<-Data[end_index,1] ##end date of max drawdown
+  start_index<-which.max(port[1:end_index,1]) ##index for the start date of the maw drawdown
+  start_date<-Data[start_index,1] ##start date of the max drawdown
+  d<-list(start_date,end_date,maxDrawdow)
+  names(d)<-c("Start date","End date","Return")
+  
+  ##Output list
+  l<-list(m,cumul_ret,sigma,sharpe,skew,kurt,worstday,d,quantiles,cvar)
+  names(l)=c("Mean","Cumulative Return","Volatility","Sharpe Ratio","Skewness",
+             "Kurtosis","10 worst daily drawdowns","Max Drawdown","Quantiles","CVAR")
+  print(l)
+}
 
 ############################################################Markov############################################
 
