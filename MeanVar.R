@@ -167,9 +167,8 @@ strategy_meanvar <- function(data.assets, lookback, rebal, policy_weight, data.r
   wealth_minvar <- data.assets_rebal[lookback:no_rows,1:2]
   colnames(wealth_minvar) <- c("Date","Wealth")
   wealth_minvar[,2] <- 1
-  wealth_maxret <- wealth_minvar
-  wealth_maxsharpe <- wealth_minvar
-  wealth_policy <- wealth_minvar
+  #Set default shape for others
+  wealth_policy <- wealth_maxsharpe <- wealth_maxret <- wealth_minvar
   
   weight_minvar <- data.assets_rebal[lookback:no_rows,]
   weight_maxret <- data.assets_rebal[lookback:no_rows,]
