@@ -64,7 +64,7 @@ mean_var_optimizer_unconstrained <- function (mean_returns, cov_matrix, rf)
 
   #full frontier is linear combination of the above, find maximum sharpe
   return_seq <- min_var_return[1] + seq(1,50,1) * (max_ret_return[1]-min_var_return[1]) /50
-  max_sharpe <- 0
+  max_sharpe_position <- max_sharpe <- 0
   max_sharpe_weights <- min_var_weights
 
   for(i in 1:50)
@@ -74,14 +74,16 @@ mean_var_optimizer_unconstrained <- function (mean_returns, cov_matrix, rf)
     p_weight <- lambda*min_var_weights + (1-lambda) * max_ret_weights
     p_variance <- t(p_weight) %*% cov_matrix %*% p_weight
     sharpe <- (return_seq[i] -rf )/ sqrt(p_variance)
+    #print(sharpe)
     if(sharpe>max_sharpe)
     {
       max_sharpe <- sharpe
       max_sharpe_weights <- p_weight
+      max_sharpe_position <- i
     }
   }
   
-  return(list(min_var_weights, max_ret_weights, max_sharpe_weights))
+  return(list(min_var_weights, max_ret_weights, max_sharpe_weights, max_sharpe_position))
 }
 
 #####################################################################################################################
@@ -141,14 +143,14 @@ mean_var_optimizer_long_only <- function (returns.data, rf)
     #print(paste(round(i/length(vec) * 100, 0), "% done..."))
   }
   
-  return(list(minvar.opt$weights,maxret.opt$weights,frontier.weights[max_sharpe_index,]))
+  return(list(minvar.opt$weights,maxret.opt$weights,frontier.weights[max_sharpe_index,],max_sharpe_index))
 }
 
 
 ################################################################################
 
 
-strategy_meanvar <- function(data.assets, lookback, rebal, policy_weight, data.rf, use.unconstrained=T)             #Lookback & rebal in days
+strategy_meanvar <- function(data.assets, lookback, rebal, policy_weight, data.rf, use.unconstrained=TRUE)             #Lookback & rebal in days
 {
   no_cols <- ncol(data.assets) -1
   day_seq <- seq(1,nrow(data.assets),rebal)                              #note how this has fixing bias
@@ -168,11 +170,9 @@ strategy_meanvar <- function(data.assets, lookback, rebal, policy_weight, data.r
   colnames(wealth_minvar) <- c("Date","Wealth")
   wealth_minvar[,2] <- 1
   #Set default shape for others
-  wealth_policy <- wealth_maxsharpe <- wealth_maxret <- wealth_minvar
+  sharpe.pos <- wealth_policy <- wealth_maxsharpe <- wealth_maxret <- wealth_minvar
   
-  weight_minvar <- data.assets_rebal[lookback:no_rows,]
-  weight_maxret <- data.assets_rebal[lookback:no_rows,]
-  weight_maxsharpe <- data.assets_rebal[lookback:no_rows,]
+  weight_maxsharpe <- weight_maxret <- weight_minvar <- data.assets_rebal[lookback:no_rows,]
   
   i<-1
   for(i in 1:(no_rows-lookback-1))
@@ -191,6 +191,7 @@ strategy_meanvar <- function(data.assets, lookback, rebal, policy_weight, data.r
     weight_minvar[i,-1] <- weights[[1]]
     weight_maxret[i,-1] <- weights[[2]]
     weight_maxsharpe[i,-1] <- weights[[3]]
+    sharpe.pos[i+1,2] <- weights[[4]]
     
     wealth_minvar[i+1,2] <- wealth_minvar[i,2]*(1+sum(weight_minvar[i,-1]*ret_assets[i+lookback+1,-1]))
     wealth_maxret[i+1,2] <- wealth_maxret[i,2]*(1+sum(weight_maxret[i,-1]*ret_assets[i+lookback+1,-1]))
