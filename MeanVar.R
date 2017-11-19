@@ -53,37 +53,43 @@ mean_var_optimizer_unconstrained <- function (mean_returns, cov_matrix, rf)
   
   #frontier portfolios
   min_var_weights <- ( solve(cov_matrix) %*% iota ) / (t(iota) %*% solve(cov_matrix) %*% iota)[1]
-  max_ret_weights <- ( solve(cov_matrix) %*% mean_returns ) / (t(iota) %*% solve(cov_matrix) %*% mean_returns)[1]
-
+  w2_weights <- ( solve(cov_matrix) %*% mean_returns ) / (t(iota) %*% solve(cov_matrix) %*% mean_returns)[1]
+  
+  #The second frontier is NOT a max return portfolio
+  
   min_var_return <- t(min_var_weights) %*% mean_returns
-  max_ret_return <- t(max_ret_weights) %*% mean_returns
+  w2_return <- t(w2_weights) %*% mean_returns
   min_var_var <- (t(min_var_weights) %*% cov_matrix %*% min_var_weights)
-  max_ret_var <- (t(max_ret_weights) %*% cov_matrix %*% max_ret_weights)
+  w2_var <- (t(w2_weights) %*% cov_matrix %*% w2_weights)
   sharpe_min_var <- (min_var_return[1] -rf) / sqrt(min_var_var[1])
-  sharpe_max_ret <- (max_ret_return[1] -rf) / sqrt(max_ret_var[1])
-
+  sharpe_w2 <- (w2_return[1] -rf) / sqrt(w2_var[1])
+  
   #full frontier is linear combination of the above, find maximum sharpe
-  return_seq <- min_var_return[1] + seq(1,50,1) * (max_ret_return[1]-min_var_return[1]) /50
-  max_sharpe_position <- max_sharpe <- 0
+  #create sequence of 250 with interval as 1/25th of diff b/w returns
+  
+  return_seq <- min_var_return[1] + seq(1,250,1) * (w2_return[1]-min_var_return[1]) /25
+  max_sharpe <- sharpe_min_var
   max_sharpe_weights <- min_var_weights
-
-  for(i in 1:50)
+  
+  #Need to run till sharpe decreases from before to get tangent portfolio
+  for(i in 1:250)
   {
-    return_seq[i] 
-    lambda <- (return_seq[i] - max_ret_return[1]) / (min_var_return[1] - max_ret_return[1])
-    p_weight <- lambda*min_var_weights + (1-lambda) * max_ret_weights
+    lambda <- (return_seq[i] - w2_return[1]) / (min_var_return[1] - w2_return[1])
+    p_weight <- lambda*min_var_weights + (1-lambda) * w2_weights
     p_variance <- t(p_weight) %*% cov_matrix %*% p_weight
     sharpe <- (return_seq[i] -rf )/ sqrt(p_variance)
-    #print(sharpe)
+    if(max(p_weight)>1) {break}                         #constraint on leverage is 1
     if(sharpe>max_sharpe)
     {
-      max_sharpe <- sharpe
+      max_sharpe <- sharpe[1,1]
       max_sharpe_weights <- p_weight
-      max_sharpe_position <- i
     }
+    else
+    {break}                               #if sharpe is lower than max sharpe, we have reached tangency
   }
   
-  return(list(min_var_weights, max_ret_weights, max_sharpe_weights, max_sharpe_position))
+  max_sharpe_return <- t(max_sharpe_weights) %*% mean_returns
+  return(list(min_var_weights, w2_weights, max_sharpe_weights))
 }
 
 #####################################################################################################################
