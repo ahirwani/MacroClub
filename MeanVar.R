@@ -1,6 +1,7 @@
 rm(list = ls())
 
 setwd("/Users//adhya/Documents/R_Macro/")
+setwd("C://R//MAXIM//MacroClub")
 library(lpSolve)
 library(openxlsx)
 library(lubridate)
@@ -11,11 +12,26 @@ library(PerformanceAnalytics)
 library(ROI)
 library(ROI.plugin.glpk)
 library(ROI.plugin.quadprog)
+library(reshape2)
+
+##Parameters
+min.history.date <- as.Date("2001-01-01")
 
 data.macro <- read.xlsx("MacroIndices.xlsx")
 data.macro[,1] <- convertToDate(data.macro[,1],origin="1899-12-30")
 n.rows <- nrow(data.macro)
 n.cols <- ncol(data.macro) -1
+
+stock.list <- read.csv("GMIStockList-CSV.csv")
+stock.list$Date <- as.Date(stock.list$Date)
+str(stock.list);
+min.date.list <- aggregate(Date ~ Stock, data = stock.list, min)
+stocks.to.avoid <- min.date.list[min.date.list$Date >= min.history.date,]$Stock
+stock.cast <- dcast(stock.list, Date ~ Stock, value.var = "Price", fun.aggregate = mean)
+stock.cast <- na.locf(stock.cast)[stock.cast$Date >= min.history.date,]
+stock.cast <- stock.cast[,!(colnames(stock.cast) %in% stocks.to.avoid)]
+head(stock.cast)
+
 
 # When reading a csv/excel/etc file, data is imported as a dataframe of factors. 
 # Factors are not a particularly useful kind of way to store the financial series, so the next steps
