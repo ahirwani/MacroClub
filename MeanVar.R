@@ -22,6 +22,19 @@ data.macro[,1] <- convertToDate(data.macro[,1],origin="1899-12-30")
 n.rows <- nrow(data.macro)
 n.cols <- ncol(data.macro) -1
 
+# When reading a csv/excel/etc file, data is imported as a dataframe of factors. 
+# Factors are not a particularly useful kind of way to store the financial series, so the next steps
+# convert the return data from factors to numeric vectors. We could have also used the xts package for 
+# handling time series.
+x <- data.macro[,-1]
+m <- sapply(data.macro[,-1],function(x) as.numeric(as.character(x)))
+data.macro[,-1] <- m
+
+data.rf <- data.macro[,1:2]
+data.rf[,2] <- data.macro[,12]
+
+##Pull in data from Stock List made by CSV and reshape it into same format as data.macro
+#Reduce the data down to only have data with history before the min. history date and clean the missing values with LOCF
 stock.list <- read.csv("GMIStockList-CSV.csv")
 stock.list$Date <- as.Date(stock.list$Date)
 str(stock.list);
@@ -33,13 +46,6 @@ stock.cast <- stock.cast[,!(colnames(stock.cast) %in% stocks.to.avoid)]
 head(stock.cast)
 
 
-# When reading a csv/excel/etc file, data is imported as a dataframe of factors. 
-# Factors are not a particularly useful kind of way to store the financial series, so the next steps
-# convert the return data from factors to numeric vectors. We could have also used the xts package for 
-# handling time series.
-x <- data.macro[,-1]
-m <- sapply(data.macro[,-1],function(x) as.numeric(as.character(x)))
-data.macro[,-1] <- m
 
 mean_var_optimizer_unconstrained <- function (mean_returns, cov_matrix, rf)
 {
@@ -142,13 +148,18 @@ mean_var_optimizer_long_only <- function (returns.data, rf)
 ################################################################################
 
 
-strategy_meanvar <- function(data.assets, lookback, rebal, policy_weight, data.rf)             #Lookback & rebal in days
+strategy_meanvar <- function(data.assets, lookback, rebal, policy_weight, data.rf, use.unconstrained=T)             #Lookback & rebal in days
 {
   no_cols <- ncol(data.assets) -1
   day_seq <- seq(1,nrow(data.assets),rebal)                              #note how this has fixing bias
   data.assets_rebal <- data.assets[day_seq,]
   no_rows <- nrow(data.assets_rebal)
   no_periods <- lookback/rebal
+  #Calculate the Returns
+  #Log Returns
+  ret_assets_max <- cbind(DDate = data.assets_rebal[-1,]$Date, as.data.frame(diff(log(as.matrix(data.assets_rebal[,-1])))))
+  ret_rf_max <- diff(log(data.rf$Dollar.Index))
+  #Non Log Returns
   ret_assets <- data.assets_rebal[-1,]
   ret_assets[,2:(no_cols+1)] <- data.assets_rebal[-1,-1]/data.assets_rebal[-no_rows,-1] -1
   ret_rf <- data.rf[-1,-1]/data.rf[-no_rows,-1] -1
@@ -171,7 +182,8 @@ strategy_meanvar <- function(data.assets, lookback, rebal, policy_weight, data.r
     mean_rf <- mean(ret_rf[i:i+lookback])
     cov_mat <- cov(ret_assets[i:(i+lookback),-1])
     #cor_mat <- cor(ret_assets[i:(i+lookback),-1])
-    weights <- mean_var_optimizer(mean_ret, cov_mat, mean_rf)            #Risk Free: T-bills
+    weights <- if(use.unconstrained){mean_var_optimizer_unconstrained(mean_ret, cov_mat, mean_rf)}else{
+      mean_var_optimizer_long_only(mean_ret, cov_mat, mean_rf)}           #Risk Free: T-bills
     
     #mean_returns <- mean_ret
     #cov_matrix <- cov_mat
@@ -208,13 +220,11 @@ statistics <- function(X)                 #function to compute statistics for an
 
 i<-1
 policy_weight <- c(0.05,0.3,0.05,0.15,0.10,0.05,0.05,0.05,0.20)
-strategy_meanvar(data.macro,155,5,policy_weight)
+strategy_meanvar(data.assets = data.macro,lookback=155,rebal=5,policy_weight, data.rf = data.rf)
 data.assets <-data.macro[,1:10]
 data.ts <- xts(data.assets[,-1],order.by = as.Date(data.assets[,1], "%m/%d/%Y"))
 lookback <- 155
 rebal <- 5
-data.rf <- data.macro[,1:2]
-data.rf[,2] <- data.macro[,12]
 mean_var_optimizer_long_only(data.assets[,2:10],0.0016)
 
 
