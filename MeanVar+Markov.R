@@ -1,6 +1,6 @@
 rm(list = ls())
 
-#setwd("/Users//adhya/Documents/R_Macro/MacroClub/")
+setwd("/Users//adhya/Documents/R_Macro/MacroClub/")
 #setwd("C://R//MAXIM//MacroClub")
 
 ##########################################################################
@@ -13,10 +13,12 @@ library(zoo)
 library(xts)
 library(moments)
 library(PerformanceAnalytics)
+library('depmixS4')
+library('quantmod')
 
 data.macro <- read.xlsx("MacroIndices.xlsx")
 data.macro[,1] <- convertToDate(data.macro[,1],origin="1899-12-30")
-data_ret_frame <-data.macro[-1,]
+data_ret_frame <- data.macro[-1,]
 data_ret_frame[,2:ncol(data.macro)] <- log(data.macro[-1,-1]/data.macro[-nrow(data.macro),-1])
 data_ret <- xts(data_ret_frame[,-1],order.by = as.Date(data_ret_frame[,1], "%m/%d/%Y"))
 
@@ -226,15 +228,34 @@ statistics<-function(port)
 }
 
 ############################################################Markov############################################
+trmat <- function ( d ) {
+  M <- attributes ( d ) $ nstates
+  Mat <- matrix ( 0, M, M )
+  for ( i in 1 : M ) {
+    for ( j in 1 : M ) {
+      Mat [ i, j ] <- ( attributes ( d ) $ transition [[ i ]] )@ parameters $ coefficients [ j ]
+    } 
+  } 
+  return(Mat)
+}
 
+state_descript <- function ( d ) {
+  M <- attributes ( d ) $ nstates
+  Mat <- matrix ( 0, M)
+  for ( i in 1 : M ) {
+    Mat [ i ] <- unname((attributes(d) $response[[i]])[[1]] @parameters $coefficients)
+  } 
+  return(Mat)
+}
 
+data_returns <- monthly_returns
 markov_regime <- function(data_returns)
 {
   mean_ret <- colMeans(data_returns)
   cov_ret <- cov(data_returns)
   cov_inv <- solve(cov_ret)
   turbulence <- apply(data_returns,1, function(x) sqrt(0.5* (t(x-mean_ret)%*% cov_inv %*%(x-mean_ret))))
-  hmm <- depmix(turbulence ~ 1, family = gaussian(), nstates = 3, data=data.frame(turbulence=turbulence))
+  hmm <- depmix(turbulence ~ 1, family = gaussian(), nstates = 2, data=data.frame(turbulence=turbulence))
   hmmfit <- fit(hmm, verbose = FALSE)
   post_probs <- posterior(hmmfit)
   statedef <- state_descript(hmmfit)
@@ -243,6 +264,11 @@ markov_regime <- function(data_returns)
   
   return(list(statedef,next_prob))
 }
+
+plot(index(monthly_returns),turbulence,type='l', col="black", main='Historical Turbulence', cex.main=0.9, xlab='', ylab='Turbulence', lwd=0.8)
+plot(index(monthly_returns),post_probs$state, type='l', main='Regime Posterior Probabilities', 
+     ylab='State',xlab='Date', cex.main=0.9)
+
 
 ####################################################################################
 ##Need to edit this#################
