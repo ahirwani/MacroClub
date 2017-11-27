@@ -1,6 +1,6 @@
 rm(list = ls())
 
-#setwd("/Users//adhya/Documents/R_Macro/MacroClub/")
+setwd("/Users//adhya/Documents/R_Macro/MacroClub/")
 #setwd("C://R//MAXIM//MacroClub")
 
 ##########################################################################
@@ -13,6 +13,8 @@ library(zoo)
 library(xts)
 library(moments)
 library(PerformanceAnalytics)
+library('depmixS4')
+library('quantmod')
 
 data.macro <- read.xlsx("MacroIndices.xlsx")
 data.macro[,1] <- convertToDate(data.macro[,1],origin="1899-12-30")
@@ -22,7 +24,7 @@ data_ret <- xts(data_ret_frame[,-1],order.by = as.Date(data_ret_frame[,1], "%m/%
 
 monthly_day<- seq(21,nrow(data_ret),21)
 cum_return_21day <- rollapply(data_ret,width=21,sum)
-monthly_returns <-cum_return_21day[monthly_day][-1,1:9]            #Dont use t bills/ notes since they are safe
+monthly_returns <-cum_return_21day[monthly_day][,1:9]            #Dont use t bills/ notes since they are safe
 data_month <-data.frame(coredata(monthly_returns))                 #convert to data frame
 data_month_all <- data.frame(coredata(cum_return_21day[monthly_day][-1,]))           #in case you need all
 
@@ -227,57 +229,80 @@ statistics<-function(port)
 
 ############################################################Markov############################################
 
+#Information functions
+trmat <- function ( d ) {
+  M <- attributes ( d ) $ nstates
+  Mat <- matrix ( 0, M, M )
+  for ( i in 1 : M ) {
+    for ( j in 1 : M ) {
+      Mat [ i, j ] <- ( attributes ( d ) $ transition [[ i ]] )@ parameters $ coefficients [ j ]
+    } 
+  } 
+  return(Mat)
+}
 
+state_descript <- function ( d ) {
+  M <- attributes ( d ) $ nstates
+  Mat <- matrix ( 0, M)
+  for ( i in 1 : M ) {
+    Mat [ i ] <- unname((attributes(d) $response[[i]])[[1]] @parameters $coefficients)
+  } 
+  return(Mat)
+}
+
+#Computing regimes
 markov_regime <- function(data_returns)
 {
   mean_ret <- colMeans(data_returns)
   cov_ret <- cov(data_returns)
   cov_inv <- solve(cov_ret)
-  turbulence <- apply(data_returns,1, function(x) sqrt(0.5* (t(x-mean_ret)%*% cov_inv %*%(x-mean_ret))))
-  hmm <- depmix(turbulence ~ 1, family = gaussian(), nstates = 3, data=data.frame(turbulence=turbulence))
+  turbulence <- apply(data_returns,1, function(x) sqrt(0.5* (t(x-mean_ret)%*% cov_inv %*%(x-mean_ret))))    #decision variable turbulence
+  hmm <- depmix(turbulence ~ 1, family = gaussian(), nstates = 2, data=data.frame(turbulence=turbulence))   #fit 2 states
   hmmfit <- fit(hmm, verbose = FALSE)
   post_probs <- posterior(hmmfit)
   statedef <- state_descript(hmmfit)
   transition <- trmat(hmmfit)
-  next_prob <- data.matrix(post_probs[length(turbulence),2:4]) %*% transition
+  next_prob <- data.matrix(post_probs[length(turbulence),2:3]) %*% transition        #make sure dimensions are conformable with no states
   
-  return(list(statedef,next_prob))
+  return(list(statedef,next_prob,post_probs))
 }
 
 ####################################################################################
-##Need to edit this#################
+##Markov Mean Variance Strategy#################
 
-#strategy 1 : w_stock = max_turb * 0 + med_turb *0.6 + low_turb * 1
-#strategy 2 : w_stock = max prob state
-weight_params=c(0.9,0.6,0.3)
-
-wealth_blend <- monthly_returns[120:nrow(monthly_returns),1]
-colnames(wealth_blend) <- c("Blended Markov")
-wealth_blend[,1] <- 1
-benchmark <- wealth_blend
+#Start with 3 years of calibration, and keep increasing
+wealth_minvar <- monthly_returns[36:nrow(monthly_returns),1]
+colnames(wealth_minvar) <- c("Markov 2 States")
+wealth_minvar[,1] <- 1
+wealth_maxsharpe <- wealth_minvar
+benchmark <- wealth_minvar
 colnames(benchmark) <- c("Benchmark")
-weight_blend <- wealth_blend[1:(nrow(wealth_blend)-1)]
-colnames(weight_blend) <- c("Equity Weight")
-wealth_choose <- wealth_blend
-colnames(wealth_choose) <- c("Max Prob Markov")
-weight_choose <- weight_blend
+weight_minvar <- monthly_returns[36:nrow(monthly_returns),]
+weight_minvar[,] <- 0 
+weight_maxsharpe <- weight_minvar
 states_list <- list()
 nextprob_list <- list()
 
-for(i in 2:nrow(wealth_blend))
+#i<-11 computationally singular case
+for(i in 2:nrow(wealth_minvar))
 {
-  data <- data_month[1:(118+i),]
+  data <- data_month[1:(34+i),]
   markov <- markov_regime(data)
   states_list[[i-1]] <- markov[[1]]
   nextprob_list[[i-1]] <- markov[[2]]
   states <- states_list[[i-1]]
   nextprob <- nextprob_list[[i-1]]
-  weight_blend[i-1] <- weight_params[3]*nextprob[which.max(states)] + weight_params[1]*nextprob[which.min(states)] + 
-    weight_params[2] * nextprob[which(states==sort(states,partial=2)[2])]
-  wealth_blend[i,1] <- wealth_blend[i-1,1]* (weight_blend[[i-1,1]]*exp(data_month_all[[119+i,1]]) +
-                                               (1-weight_blend[[i-1,1]])*exp(data_month_all[[119+i,3]]))
-  weight_choose[i-1] <- weight_params[rank(states)[which.max(nextprob)]]
-  wealth_choose[i,1] <- wealth_choose[i-1,1]* (weight_choose[[i-1,1]]*exp(data_month_all[[119+i,1]]) +
-                                                 (1-weight_choose[[i-1,1]])*exp(data_month_all[[119+i,3]]))
-  benchmark[i,1] <- benchmark[[i-1,1]]*(0.6*exp(data_month[[119+i,1]]) + 0.4*exp(data_month_all[[119+i,3]]))
+  post_prob <- markov[[3]]
+  data_state1 <- data[which(post_prob[,1]==1),]
+  data_state2 <- data[which(post_prob[,1]==2),]
+  weights_state1 <- mean_var_optimizer_unconstrained(colMeans(data_state1),cov(data_state1),rf)
+  weights_state2 <- mean_var_optimizer_unconstrained(colMeans(data_state2),cov(data_state2),rf)
+  
+  weight_minvar[i-1,] <- weights_state1[[1]]*nextprob[1] + weights_state2[[1]]*nextprob[2] 
+  weight_maxsharpe[i-1,] <- weights_state1[[3]]*nextprob[1] + weights_state2[[3]]*nextprob[2] 
+  
+  wealth_minvar[i,1] <- wealth_minvar[i-1,1]* sum(coredata(weight_minvar[i-1,])*exp(data_month[35+i,]))
+  wealth_maxsharpe[i,1] <- wealth_maxsharpe[i-1,1]* sum(coredata(weight_maxsharpe[i-1,])*exp(data_month[35+i,]))
+  
+  benchmark[i,1] <- benchmark[[i-1,1]]*sum(policy_weight*exp(data_month[35+i,]))
 }
