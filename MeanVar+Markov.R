@@ -81,15 +81,19 @@ mean_var_optimizer_unconstrained <- function (mean_returns, cov_matrix, rf)
   iota <- rep(1,ncol(cov_matrix))
   
   #frontier portfolios
-  min_var_weights <- ( solve(cov_matrix) %*% iota ) / (t(iota) %*% solve(cov_matrix) %*% iota)[1]
-  w2_weights <- ( solve(cov_matrix) %*% mean_returns ) / (t(iota) %*% solve(cov_matrix) %*% mean_returns)[1]
+  min_var_weights <- ( solve(cov_matrix, tol=1e-21) %*% iota ) / (t(iota) %*% solve(cov_matrix, tol=1e-21) %*% iota)[1]
+  w2_weights <- ( solve(cov_matrix, tol = 1e-21) %*% mean_returns ) / (t(iota) %*% solve(cov_matrix, tol=1e-21) %*% mean_returns)[1]
   
   #The second frontier is NOT a max return portfolio
   
   min_var_return <- t(min_var_weights) %*% mean_returns
   w2_return <- t(w2_weights) %*% mean_returns
   min_var_var <- (t(min_var_weights) %*% cov_matrix %*% min_var_weights)
+  #hack for negative variance
+  if(min_var_var < 0){min_var_var <- 0.001}
   w2_var <- (t(w2_weights) %*% cov_matrix %*% w2_weights)
+  #hack for negative variance
+  if(w2_var < 0){w2_var <- 0.001}
   sharpe_min_var <- (min_var_return[1] -rf) / sqrt(min_var_var[1])
   sharpe_w2 <- (w2_return[1] -rf) / sqrt(w2_var[1])
   
@@ -106,6 +110,8 @@ mean_var_optimizer_unconstrained <- function (mean_returns, cov_matrix, rf)
     lambda <- (return_seq[i] - w2_return[1]) / (min_var_return[1] - w2_return[1])
     p_weight <- lambda*min_var_weights + (1-lambda) * w2_weights
     p_variance <- t(p_weight) %*% cov_matrix %*% p_weight
+    #hack for negative variance
+    if(p_variance < 0){p_variance <- 0.001}
     sharpe <- (return_seq[i] -rf )/ sqrt(p_variance)
     if(max(p_weight)>1) {break}                         #constraint on leverage is 1
     if(sharpe>max_sharpe)
@@ -290,6 +296,7 @@ nextprob_list <- list()
 #i<-11 computationally singular case
 for(i in 2:nrow(wealth_minvar))
 {
+  print(paste0("Working on State: ",i," of ",nrow(wealth_minvar)))
   data <- data_month[1:(34+i),]
   markov <- markov_regime(data)
   states_list[[i-1]] <- markov[[1]]
@@ -297,7 +304,7 @@ for(i in 2:nrow(wealth_minvar))
   states <- states_list[[i-1]]
   nextprob <- nextprob_list[[i-1]]
   post_prob <- markov[[3]]
-  data_state1 <- data[which(post_prob[,1]==1),]
+  data_state1 <- data[which(post_prob[,1]==1),] # 
   data_state2 <- data[which(post_prob[,1]==2),]
   weights_state1 <- mean_var_optimizer_unconstrained(colMeans(data_state1),cov(data_state1),rf)
   weights_state2 <- mean_var_optimizer_unconstrained(colMeans(data_state2),cov(data_state2),rf)
