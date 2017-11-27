@@ -13,8 +13,12 @@ library(zoo)
 library(xts)
 library(moments)
 library(PerformanceAnalytics)
+<<<<<<< HEAD
 library('depmixS4')
 library('quantmod')
+=======
+library(depmixS4)
+>>>>>>> 59a4061066978b473b8e47a3d3c672307c5ed044
 
 data.macro <- read.xlsx("MacroIndices.xlsx")
 data.macro[,1] <- convertToDate(data.macro[,1],origin="1899-12-30")
@@ -38,6 +42,8 @@ mean_returns <- colMeans(monthly_returns)
 cov_matrix <- cov(monthly_returns)
 
 w <- mean_var_optimizer_unconstrained(mean_returns, cov_matrix, rf)
+data_assets_ret <- monthly_returns
+
 static_portfolios(w[[1]][,1],w[[3]][,1],policy_weight)
 w_minvar <- w[[1]][,1]
 w_sharpe <- w[[3]][,1]
@@ -123,11 +129,10 @@ strategy_meanvar <- function(data_assets_ret, lookback, rebal, policy_weight, rf
   no_cols <- ncol(data_assets_ret)
   no_rows <- nrow(data_assets_ret)
   
-  wealth_minvar <- data_assets_ret[lookback:no_rows,1]
-  colnames(wealth_minvar) <- c("Wealth")
+  wealth_minvar <- data.frame(Wealth=data_assets_ret[lookback:no_rows,1])
+  #colnames(wealth_minvar) <- c("Wealth")
   wealth_minvar[,1] <- 1
-  wealth_maxsharpe <- wealth_minvar
-  wealth_policy <- wealth_minvar
+  wealth_policy <- wealth_maxsharpe <- wealth_minvar
   
   weight_minvar <- data_assets_ret[(lookback-1):no_rows,]
   weight_maxsharpe <- data_assets_ret[(lookback-1):no_rows,]
@@ -191,26 +196,25 @@ maxdrawdown<-function(returns){
 statistics<-function(port)
 {
   
-  returns <- port[-nrow(port),]
+  returns <- data.frame(Returns= port[-nrow(port),])
   for(i in 1:(nrow(port)-1))
   {
     returns[i,1] <- log(port[[i+1,1]]/port[[i,1]])
   }
-  colnames(returns) <- c("Returns")
   
   ##First measures
-  m<-mean(returns)
+  m<-mean(returns[,1])
   cumul_ret<-port[[nrow(port),1]]/port[[1,1]] -1
-  sigma<-sd(returns)
+  sigma<-sd(returns[,1])
   sharpe<-(m-rf)/sigma
   skew<-unname(skewness(returns))
   kurt<-unname(kurtosis(returns))
-  worstday<-returns[order(returns)[1:10]] ##10 worst days
-  quantiles<-quantile(returns,seq(0.01,0.05,length=6))
-  cvar<-ES(returns,p=0.95,method="gaussian") ##cvar
+  worstday<-returns[order(returns)[1:10],1] ##10 worst days
+  quantiles<-quantile(returns[,1],seq(0.01,0.05,length=6))
+  cvar<-ES(returns[,1],p=0.95,method="gaussian") ##cvar
   
   #Drawdown
-  a<-maxdrawdown(returns[,1])
+  a<-maxdrawdown(returns)
   maxDrawdow<-a[1] ##max drawdown in simple returns
   Data<-data.frame(date = index(returns), returns, row.names=NULL)
   end_index<-a[2] ##index for the end date of the max drawdown
